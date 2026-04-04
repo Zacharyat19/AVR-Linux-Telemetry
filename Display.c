@@ -23,13 +23,13 @@ bool process_is_running(const char* process_name)
     {
         if(isdigit((unsigned char)entry->d_name[0]))
         {
-            char file_name[100];
+            char file_name[280]; 
             snprintf(file_name, sizeof(file_name), "/proc/%s/comm", entry->d_name);
 
             FILE* file = fopen(file_name, "r");
             if(!file) continue;
 
-            char name[50];
+            char name[256]; 
             if(fgets(name, sizeof(name), file) != NULL)
             {
                 name[strcspn(name, "\n")] = '\0';

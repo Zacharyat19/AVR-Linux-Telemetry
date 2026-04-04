@@ -5,9 +5,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define PAYLOAD_SIZE 6
-#define DISPLAY_NUM_0 0xC0
-#define DISPLAY_NUM_1 0xF9
+#define PAYLOAD_SIZE 1 
+#define PROCESS_DOWN 0x00 // Binary 00000000 (All LEDs OFF)
+#define PROCESS_UP   0x01 // Binary 00000001 (Turns ON LED D1)
 
 bool process_is_running(const char* process_name);
 int serial_init(const char* device_path);
