@@ -11,6 +11,6 @@
 
 bool process_is_running(const char* process_name);
 int serial_init(const char* device_path);
-void serial_transmit(int file_descriptor, const uint8_t* payload, size_t size);
+void serial_transmit(int file_descriptor, uint8_t payload);
 
 #endif
