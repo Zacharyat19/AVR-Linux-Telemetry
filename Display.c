@@ -10,71 +10,81 @@
 
 #include "Display.h"
 
-/*
+/**
  * KERNEL PROCESS POLLING
  * Instead of spawning a heavy external shell command like system("pgrep"), 
  * this function reads directly from the Linux virtual filesystem (/proc). 
  * This is the highly efficient, standard approach for process monitoring 
  * in embedded C applications.
  */
-bool process_is_running(const char* process_name)
+int process_is_running(const char* process_name)
 {
-    // The /proc directory holds all active kernel processes as subdirectories.
+    // Open the /proc directory, where the kernel stores process information
     DIR* dir = opendir("/proc");
-    if(!dir) return false;
+    if (!dir) return 0;
 
     struct dirent* entry;
-
-    // Iterate through every item in the /proc directory.
-    while((entry = readdir(dir)) != NULL)
+    while ((entry = readdir(dir)) != NULL)
     {
-        // Process directories are strictly numerical (their PID).
-        // If the directory name doesn't start with a digit, ignore it.
-        if(isdigit((unsigned char)entry->d_name[0]))
+        // Directories named with numbers represent active Process IDs (PIDs)
+        if (isdigit((unsigned char)entry->d_name[0]))
         {
-            char file_name[280]; 
-            // Construct the path to the 'comm' file, which contains the process name.
-            snprintf(file_name, sizeof(file_name), "/proc/%s/comm", entry->d_name);
+            char path[280];
+            // 'cmdline' contains the full execution path and arguments
+            snprintf(path, sizeof(path), "/proc/%s/cmdline", entry->d_name);
 
-            FILE* file = fopen(file_name, "r");
-            if(!file) continue;
-
-            char name[256]; 
-            if(fgets(name, sizeof(name), file) != NULL)
+            FILE* f = fopen(path, "r");
+            if (f)
             {
-                // Strip the trailing newline character injected by the OS.
-                name[strcspn(name, "\n")] = '\0';
-
-                // Evaluate if the kernel's process name matches our target.
-                if(strcmp(process_name, name) == 0)
+                char buf[1024]; // Larger buffer to capture long paths or venv paths
+                size_t len = fread(buf, 1, sizeof(buf) - 1, f);
+                if (len > 0)
                 {
-                    fclose(file);
-                    closedir(dir);
-                    return true;
+                    buf[len] = '\0';
+                    
+                    /**
+                     * The kernel separates arguments in /proc/[pid]/cmdline with NULL bytes ('\0').
+                     * Standard string functions like strstr() stop at the first NULL. 
+                     * We replace NULLs with spaces to treat the whole command line as one searchable string.
+                     */
+                    for(size_t i = 0; i < len; i++) {
+                        if(buf[i] == '\0') buf[i] = ' ';
+                    }
+
+                    // Check if our target process name exists anywhere in the command string
+                    if (strstr(buf, process_name) != NULL)
+                    {
+                        fclose(f);
+                        closedir(dir);
+                        return 1; // Process found
+                    }
                 }
+                fclose(f);
             }
-            
-            fclose(file); 
         }
     }
-
+    
+    // Cleanup if no match is found after scanning all PIDs
     closedir(dir);
-    return false;
+    return 0;
 }
 
-/*
+/**
  * HARDWARE SERIAL CONFIGURATION
  * Initializes a POSIX termios interface to communicate with the AVR microcontroller.
  */
 int serial_init(const char* device_path)
 {
-    // O_RDWR: Open for reading and writing.
-    // O_NOCTTY: Prevents the USB device from taking over as the Pi's controlling terminal.
-    // O_SYNC: Forces write operations to block until physically committed to the hardware.
+    /**
+     * O_RDWR: Open for reading and writing.
+     * O_NOCTTY: Prevents the USB device from taking over as the Pi's controlling terminal.
+     * O_SYNC: Forces write operations to block until physically committed to the hardware.
+     */
     int desc = open(device_path, O_RDWR | O_NOCTTY | O_SYNC);
     if(desc < 0) return -1;
 
     struct termios tty;
+    // Get current attributes to use as a baseline
     if(tcgetattr(desc, &tty) != 0) 
     {
         close(desc); // Prevent resource leak if attributes fail
@@ -85,19 +95,25 @@ int serial_init(const char* device_path)
     cfsetospeed(&tty, B115200);
     cfsetispeed(&tty, B115200);
 
-    // 8N1 Mode Setup (8 data bits, No parity, 1 stop bit)
-    tty.c_cflag &= ~PARENB; // Clear parity bit
-    tty.c_cflag &= ~CSTOPB; // Clear stop field, only one stop bit used
+    /**
+     * 8N1 Mode Setup (8 data bits, No parity, 1 stop bit)
+     * This is the standard serial configuration for ATmega/Arduino boards.
+     */
+    tty.c_cflag &= ~PARENB; // Clear parity bit (No parity)
+    tty.c_cflag &= ~CSTOPB; // Clear stop field (1 stop bit)
     tty.c_cflag &= ~CSIZE;  // Clear all the size bits
-    tty.c_cflag |= CS8;     // 8 bits per byte
+    tty.c_cflag |= CS8;     // Set 8 bits per byte
     
-    // Turn on READ & ignore hardware flow control lines (CLOCAL = 1)
+    // CREAD: Enable receiver.
+    // CLOCAL: Ignore modem control lines (forces connection without DTR/RTS handshake).
     tty.c_cflag |= CREAD | CLOCAL; 
 
-    // Raw Output Mode Configuration
-    // Disables canonical mode (ICANON) and OS-level parsing/newline conversions.
-    // This ensures the 0x01 or 0x00 bytes are sent exactly as intended, 
-    // without the kernel trying to format them as ASCII text.
+    /**
+     * Raw Output Mode Configuration
+     * Disables canonical mode (ICANON) and OS-level parsing/newline conversions.
+     * This ensures the 0x10 or 0x00 bytes are sent exactly as intended, 
+     * without the kernel trying to format them as ASCII text or adding carriage returns.
+     */
     tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
     tty.c_oflag &= ~OPOST;
 
@@ -108,15 +124,32 @@ int serial_init(const char* device_path)
         return -1;
     }
 
-    // Return the successfully configured file descriptor
+    // Return the successfully configured file descriptor for use with write() and select()
     return desc; 
 }
 
-/*
- * HARDWARE DISPATCH
- * Pushes the evaluated status byte across the USB bridge.
+/**
+ * SERIAL TRANSMISSION
+ * Encodes the Slot ID and State into a single byte command for the Arduino firmware.
  */
-void serial_transmit(int file_descriptor, uint8_t payload)
+void serial_transmit(int fd, uint8_t slot, uint8_t state)
 {
-    write(file_descriptor, &payload, PAYLOAD_SIZE);
+    uint8_t packet;
+    
+    // Command Protocol: Base Offset + Slot Number
+    if (state == 1) {
+        packet = CMD_ON + slot;  // e.g., 0x10 for Slot 0 ON
+    } else {
+        packet = CMD_OFF + slot; // e.g., 0x00 for Slot 0 OFF
+    }
+    
+    // Write the 1-byte command to the serial device
+    write(fd, &packet, 1);
+    
+    /**
+     * tcdrain() blocks the calling process until all output written to the file 
+     * descriptor has been physically transmitted. This prevents the Pi from 
+     * closing the port or moving to the next task before the LED actually flips.
+     */
+    tcdrain(fd); 
 }

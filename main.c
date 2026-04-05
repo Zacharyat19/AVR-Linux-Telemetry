@@ -1,58 +1,108 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/select.h>
 #include <unistd.h>
+#include <termios.h> // Required for tcdrain() to flush serial buffers
 
 #include "Display.h"
 
+/**
+ * HARDWARE CONFIGURATION
+ * PHOTO_SERVER_SLOT maps to the first LED (Pin 11) on the Arduino.
+ */
+#define PHOTO_SERVER_SLOT 0
+
 int main()
 {
-    /*
-     * INITIALIZATION PHASE
-     * Open the native USB port (CDC-ACM) connected to the ATmega32U4.
-     * The serial_init function handles the POSIX termios configuration,
-     * setting the line to 115200 baud, 8N1, in raw output mode.
+    /**
+     * 1. SERIAL INITIALIZATION
+     * Opens the communication channel to the ATmega32U4.
+     * Note: Use 'ls -l /dev/ttyACM*' to verify the port if it disconnects.
      */
-    int fd = serial_init("/dev/ttyACM0");
-    if (fd < 0) return 1;
-
-    /*
-     * TELEMETRY LOOP
-     * This infinite loop runs continuously in the background as a daemon process.
-     */
-    while (1)
+    int fd = serial_init("/dev/ttyACM0"); 
+    if (fd < 0) 
     {
-        /* * FAIL-SAFE DEFAULT
-         * Always assume the process is down until proven otherwise. 
-         * This prevents false positives if the process check fails unexpectedly.
-         */
-        uint8_t current_status = PROCESS_DOWN;
-
-        /*
-         * SYSTEM EVALUATION
-         * Scan the Linux /proc virtual filesystem to determine if the 
-         * target process is currently active in the kernel's process table.
-         */
-        if (process_is_running("photo_server")) current_status = PROCESS_UP;
-
-        /*
-         * HARDWARE UPDATE
-         * Push the 1-byte payload across the USB bus to the AVR microcontroller.
-         */
-        serial_transmit(fd, current_status);
-
-        /*
-         * CPU YIELD
-         * Suspend thread execution for 1 second.
-         * This prevents the while(1) loop from creating a "spin-lock" that would 
-         * consume 100% of a CPU core, keeping system overhead near 0%.
-         */
-        sleep(1);
+        fprintf(stderr, "Fatal Error: Could not initialize serial port.\n");
+        return 1;
     }
 
-    /* * CLEANUP
-     * Safely release the file descriptor back to the OS. 
-     * Note: In a production daemon, this would typically be reached 
-     * by intercepting a SIGINT or SIGTERM signal.
-     */
+    // 0xFF ensures the first loop always triggers a status sync
+    uint8_t last_status = 0xFF; 
+
+    while (1)
+    {
+        /**
+         * 2. TELEMETRY: Evaluate State
+         * Scans the Linux /proc filesystem for the "Photo-Server" string.
+         * This targets the Gunicorn master process or its worker threads.
+         */
+        uint8_t current_status = 0; // Default to DOWN
+        if (process_is_running("Photo-Server")) 
+        {
+            current_status = 1; // UP
+        }
+
+        /**
+         * 3. SLOT-BASED TRANSMISSION
+         * Only sends data if the status has changed to keep the serial bus quiet.
+         * Protocol: 0x10 + Slot (ON) or 0x00 + Slot (OFF)
+         */
+        if (current_status != last_status)
+        {
+            uint8_t cmd_byte;
+            if (current_status == 1) {
+                printf("Telemetry: photo_server UP. Setting Slot %d HIGH.\n", PHOTO_SERVER_SLOT);
+                cmd_byte = 0x10 + PHOTO_SERVER_SLOT; 
+            } else {
+                printf("Telemetry: photo_server DOWN. Setting Slot %d LOW.\n", PHOTO_SERVER_SLOT);
+                cmd_byte = 0x00 + PHOTO_SERVER_SLOT; 
+            }
+            
+            // Send the single byte command
+            write(fd, &cmd_byte, 1);
+            
+            // tcdrain() blocks until the byte is physically transmitted out of the UART
+            tcdrain(fd); 
+            fflush(stdout); 
+
+            last_status = current_status;
+        }
+
+        /**
+         * 4. ASYNC LISTENER: Monitor for Button 'R'
+         * Uses select() to wait for data from the Arduino without blocking the telemetry loop.
+         */
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(fd, &read_fds);
+
+        // 1-second timeout acts as the polling interval for telemetry
+        struct timeval timeout = {1, 0}; 
+        int ready = select(fd + 1, &read_fds, NULL, NULL, &timeout);
+
+        if (ready > 0 && FD_ISSET(fd, &read_fds)) 
+        {
+            char upstream_cmd;
+            // Read the incoming byte from the Arduino
+            if (read(fd, &upstream_cmd, 1) > 0) 
+            {
+                // 'R' is the specific signal sent when Button 1 is pressed
+                if (upstream_cmd == 'R') 
+                {
+                    printf("Hardware Interrupt: Button Pressed. Restarting photo_server...\n");
+                    fflush(stdout);
+                    
+                    // Trigger systemd to restart the service
+                    // Note: If running as a non-root user, 'sudo' may be required here
+                    system("/bin/systemctl restart photo-server.service");
+                    
+                    // Force a re-evaluation in the next loop to update the LED immediately
+                    last_status = 0xFF; 
+                }
+            }
+        }
+    }
+
     close(fd);
     return 0;
 }

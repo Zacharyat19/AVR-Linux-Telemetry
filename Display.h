@@ -2,48 +2,44 @@
 #define DISPLAY_H
 
 #include <stdint.h>
-#include <stdbool.h>
 
-/*
- * HARDWARE PAYLOAD DEFINITIONS
- * Defines the strict 1-byte communication protocol between the 
- * Linux telemetry daemon and the ATmega32U4 microcontroller.
+/**
+ * PROTOCOL DEFINITIONS
+ * These offsets are added to the Slot ID (0-3) to create the hex command
+ * sent over the serial bus.
+ * * Example: ON command for Slot 0 is 0x10 + 0 = 0x10
+ * Example: OFF command for Slot 2 is 0x00 + 2 = 0x02
  */
-#define PAYLOAD_SIZE 1 
+#define CMD_ON  0x10
+#define CMD_OFF 0x00
 
-/* * 0x00 (00000000): Command byte instructing the AVR to extinguish the status LED. 
+/**
+ * HARDWARE MAPPING
+ * Defines which physical LED slot on the controller corresponds to 
+ * the photo-server process.
  */
-#define PROCESS_DOWN 0x00 
+#define PHOTO_SERVER_SLOT 0
 
-/* * 0x01 (00000001): Command byte instructing the AVR to illuminate the status LED. 
+/**
+ * Initializes the serial port for communication.
+ * * @param port The device path (e.g., "/dev/ttyACM0").
+ * @return The file descriptor (fd) on success, or -1 on failure.
  */
-#define PROCESS_UP   0x01 
+int serial_init(const char* port);
 
-/*
- * ==========================================
- * TELEMETRY API
- * ==========================================
+/**
+ * Formats and sends a single-byte command to the Arduino.
+ * * @param fd    The active serial file descriptor.
+ * @param slot  The target LED slot (0 through 3).
+ * @param state 1 for ON, 0 for OFF.
  */
+void serial_transmit(int fd, uint8_t slot, uint8_t state);
 
-/*
- * process_is_running
- * Scans the Linux /proc virtual filesystem to verify if a target application is alive.
- * Returns true if the process exists, false if missing or inaccessible.
+/**
+ * Scans the Linux /proc filesystem to check if a process is active.
+ * * @param process_name The string to search for in the process command line.
+ * @return 1 if found (running), 0 if not found (down).
  */
-bool process_is_running(const char* process_name);
-
-/*
- * serial_init
- * Configures the POSIX termios hardware interface for USB CDC-ACM communication.
- * Sets the baud rate to 115200, 8N1, and disables canonical mode.
- * Returns a valid file descriptor on success, or -1 on failure.
- */
-int serial_init(const char* device_path);
-
-/*
- * serial_transmit
- * Pushes the designated 1-byte payload state across the hardware bridge.
- */
-void serial_transmit(int file_descriptor, uint8_t payload);
+int process_is_running(const char* process_name);
 
 #endif
