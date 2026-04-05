@@ -1,4 +1,4 @@
-# Photo Server Telemetry System
+# Raspberry Pi Server Telemetry System
 
 ## Overview
 This project is a hardware-software bridge designed to provide physical telemetry and control for a background Linux daemon running on a Raspberry Pi 5. The system utilizes a C daemon to monitor processes via the Linux `/proc` filesystem and transmits state data over a CDC-ACM USB serial connection to an ATmega32U4 microcontroller.
