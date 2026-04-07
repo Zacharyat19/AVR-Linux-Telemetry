@@ -2,12 +2,13 @@
 #define DISPLAY_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /**
  * PROTOCOL DEFINITIONS
  * These offsets are added to the Slot ID (0-3) to create the hex command
  * sent over the serial bus.
- * * Example: ON command for Slot 0 is 0x10 + 0 = 0x10
+ * Example: ON command for Slot 0 is 0x10 + 0 = 0x10
  * Example: OFF command for Slot 2 is 0x00 + 2 = 0x02
  */
 #define CMD_ON  0x10
@@ -41,5 +42,14 @@ void serial_transmit(int fd, uint8_t slot, uint8_t state);
  * @return 1 if found (running), 0 if not found (down).
  */
 int process_is_running(const char* process_name);
+
+/**
+ * Calculates the total and available storage space on the root filesystem
+ * and formats them into strings for the LCD display.
+ * * @param total_buf Buffer to store the formatted total space string (Line 1).
+ * @param free_buf  Buffer to store the formatted free space string (Line 2).
+ * @param max_len   The maximum size of the provided buffers.
+ */
+void get_storage_strings(char* total_buf, char* free_buf, size_t max_len);
 
 #endif

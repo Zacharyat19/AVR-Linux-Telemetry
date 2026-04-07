@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/statvfs.h>
 #include <stdio.h>    // For file reading (fopen, fgets, snprintf)
 #include <string.h>   // For string comparison (strcmp, strcspn)
 #include <dirent.h>   // For directory traversal (opendir, readdir)
@@ -139,7 +140,9 @@ void serial_transmit(int fd, uint8_t slot, uint8_t state)
     // Command Protocol: Base Offset + Slot Number
     if (state == 1) {
         packet = CMD_ON + slot;  // e.g., 0x10 for Slot 0 ON
-    } else {
+    } 
+    else 
+    {
         packet = CMD_OFF + slot; // e.g., 0x00 for Slot 0 OFF
     }
     
@@ -152,4 +155,29 @@ void serial_transmit(int fd, uint8_t slot, uint8_t state)
      * closing the port or moving to the next task before the LED actually flips.
      */
     tcdrain(fd); 
+}
+
+/**
+ * FILESYSTEM STATS
+ * Calculates total and available storage space on the root filesystem 
+ * and populates two separate string buffers for the dual-line LCD display.
+ */
+void get_storage_strings(char* total_buf, char* free_buf, size_t max_len) 
+{
+    struct statvfs stat;
+    
+    if (statvfs("/", &stat) == 0) 
+    {
+        double total_gb = (double)(stat.f_blocks * stat.f_frsize) / (1024 * 1024 * 1024);
+        double free_gb = (double)(stat.f_bavail * stat.f_frsize) / (1024 * 1024 * 1024);
+        
+        // Formatted to align nicely on the screen
+        snprintf(total_buf, max_len, "Total: %.1fGB\n", total_gb);
+        snprintf(free_buf, max_len, "Free:  %.1fGB\n", free_gb); 
+    } 
+    else 
+    {
+        snprintf(total_buf, max_len, "Disk Error\n");
+        snprintf(free_buf, max_len, "Disk Error\n");
+    }
 }

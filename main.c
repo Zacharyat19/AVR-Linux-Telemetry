@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/select.h>
 #include <unistd.h>
+#include <string.h>
 #include <termios.h> // Required for tcdrain() to flush serial buffers
 
 #include "Display.h"
@@ -37,10 +38,7 @@ int main()
          * This targets the Gunicorn master process or its worker threads.
          */
         uint8_t current_status = 0; // Default to DOWN
-        if (process_is_running("Photo-Server")) 
-        {
-            current_status = 1; // UP
-        }
+        if (process_is_running("Photo-Server")) current_status = 1; // UP
 
         /**
          * 3. SLOT-BASED TRANSMISSION
@@ -50,10 +48,13 @@ int main()
         if (current_status != last_status)
         {
             uint8_t cmd_byte;
-            if (current_status == 1) {
+            if (current_status == 1) 
+            {
                 printf("Telemetry: photo_server UP. Setting Slot %d HIGH.\n", PHOTO_SERVER_SLOT);
                 cmd_byte = 0x10 + PHOTO_SERVER_SLOT; 
-            } else {
+            } 
+            else 
+            {
                 printf("Telemetry: photo_server DOWN. Setting Slot %d LOW.\n", PHOTO_SERVER_SLOT);
                 cmd_byte = 0x00 + PHOTO_SERVER_SLOT; 
             }
@@ -101,6 +102,30 @@ int main()
                 }
             }
         }
+
+        static int loop_counter = 0;
+
+        // Update LCD every 10 iterations (10 seconds)
+        if (loop_counter % 10 == 0) 
+        {
+            char total_msg[32];
+            char free_msg[32];
+            
+            get_storage_strings(total_msg, free_msg, sizeof(total_msg));
+            
+            // 1. Send Total Space (Line 1 -> Prefix 0x21)
+            uint8_t line1_prefix = 0x21;
+            write(fd, &line1_prefix, 1);
+            write(fd, total_msg, strlen(total_msg));
+            tcdrain(fd); // Wait for the transmission to finish
+            
+            // 2. Send Free Space (Line 2 -> Prefix 0x22)
+            uint8_t line2_prefix = 0x22;
+            write(fd, &line2_prefix, 1);
+            write(fd, free_msg, strlen(free_msg));
+            tcdrain(fd);
+        }
+        loop_counter++;
     }
 
     close(fd);
