@@ -158,26 +158,37 @@ void serial_transmit(int fd, uint8_t slot, uint8_t state)
 }
 
 /**
- * FILESYSTEM STATS
- * Calculates total and available storage space on the root filesystem 
- * and populates two separate string buffers for the dual-line LCD display.
+ * SYSTEM METRICS
+ * Reads storage from statvfs and CPU temperature from the thermal sysfs.
  */
-void get_storage_strings(char* total_buf, char* free_buf, size_t max_len) 
+void get_system_metrics(char* line1_buf, char* line2_buf, size_t max_len) 
 {
+    // 1. Get Disk Space for Line 1
     struct statvfs stat;
-    
     if (statvfs("/", &stat) == 0) 
     {
-        double total_gb = (double)(stat.f_blocks * stat.f_frsize) / (1024 * 1024 * 1024);
         double free_gb = (double)(stat.f_bavail * stat.f_frsize) / (1024 * 1024 * 1024);
-        
-        // Formatted to align nicely on the screen
-        snprintf(total_buf, max_len, "Total: %.1fGB\n", total_gb);
-        snprintf(free_buf, max_len, "Free:  %.1fGB\n", free_gb); 
+        snprintf(line1_buf, max_len, "Free:  %.1fGB\n", free_gb); 
     } 
     else 
     {
-        snprintf(total_buf, max_len, "Disk Error\n");
-        snprintf(free_buf, max_len, "Disk Error\n");
+        snprintf(line1_buf, max_len, "Disk Error\n");
+    }
+
+    // 2. Get CPU Temp for Line 2
+    FILE* temp_file = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
+    if (temp_file) 
+    {
+        long raw_temp;
+        if (fscanf(temp_file, "%ld", &raw_temp) == 1) 
+        {
+            float celsius = raw_temp / 1000.0;
+            snprintf(line2_buf, max_len, "Temp:  %.1fC\n", celsius);
+        }
+        fclose(temp_file);
+    } 
+    else 
+    {
+        snprintf(line2_buf, max_len, "Temp Error\n");
     }
 }

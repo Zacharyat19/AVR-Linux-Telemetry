@@ -108,21 +108,22 @@ int main()
         // Update LCD every 10 iterations (10 seconds)
         if (loop_counter % 10 == 0) 
         {
-            char total_msg[32];
-            char free_msg[32];
+            char line1[32];
+            char line2[32];
             
-            get_storage_strings(total_msg, free_msg, sizeof(total_msg));
+            // Fetch the new metrics
+            get_system_metrics(line1, line2, sizeof(line1));
             
-            // 1. Send Total Space (Line 1 -> Prefix 0x21)
+            // Send Line 1 (Free Space)
             uint8_t line1_prefix = 0x21;
             write(fd, &line1_prefix, 1);
-            write(fd, total_msg, strlen(total_msg));
-            tcdrain(fd); // Wait for the transmission to finish
+            write(fd, line1, strlen(line1));
+            tcdrain(fd);
             
-            // 2. Send Free Space (Line 2 -> Prefix 0x22)
+            // Send Line 2 (Temperature)
             uint8_t line2_prefix = 0x22;
             write(fd, &line2_prefix, 1);
-            write(fd, free_msg, strlen(free_msg));
+            write(fd, line2, strlen(line2));
             tcdrain(fd);
         }
         loop_counter++;
