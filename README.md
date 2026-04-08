@@ -62,7 +62,6 @@ During initial testing with standard bash commands, the microcontroller would fl
 Initially, attempts to transmit raw multi-byte binary packets resulted in significant data loss and inconsistent LED states. This was due to the Linux `termios` driver interpreting certain binary values as software flow control signals (e.g., `XON/XOFF`). 
 * **The Solution:** The protocol was pivoted to a simplified 1-byte mapping. By using specific ASCII characters (like `'R'`) and hex-offset values in a hardware-safe range, bypassing the kernel's terminal processing quirks.
 
-## Future Roadmap
-
-### I2C LCD Integration
-The next architectural phase involves integrating an I2C-based LCD screen. The daemon will be expanded to calculate active storage metrics on the Raspberry Pi (e.g., disk usage percentages or remaining capacity) and transmit these strings to the LCD.
+### 5. ST7565R Initialization & Bias Overrides
+Standard libraries (U8g2/U8x8) failed to initialize the LCD correctly, resulting in solid black bars or "garbage" pixels on the left edge.
+* The Solution: Switched to an `SW_SPI` (Bit-bang) constructor to bypass core library mapping errors. Manually injected raw hex commands (`0x22` for resistor ratio and `0x81` for electronic volume) directly into the display controller via `sendF()` to match the specific voltage requirements of the custom PCB.
